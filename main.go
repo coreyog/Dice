@@ -141,10 +141,17 @@ func parseArgs(args []string) (groups []ThrowGroup, columnCount int) {
 			// accumulate total columns for this group
 			cols += num
 
-			tg.Counts[FCount{
+			fc := FCount{
 				FaceCount:  faces,
 				Percentile: percentile,
-			}] = num
+			}
+
+			_, exists := tg.Counts[fc]
+			if exists {
+				tg.Counts[fc] += num
+			} else {
+				tg.Counts[fc] = num
+			}
 		}
 
 		// keep track of longest row for formatting

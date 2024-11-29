@@ -65,6 +65,20 @@ func TestParseArgs(t *testing.T) {
 			ExpectedColCount: 2,
 		},
 		{
+			Name: "repeated face count in groups",
+			Args: []string{"3d6+2d6"},
+			ExpectedThrows: []ThrowGroup{
+				{
+					Counts: map[FCount]int{
+						{
+							FaceCount: 6,
+						}: 5,
+					},
+				},
+			},
+			ExpectedColCount: 5,
+		},
+		{
 			Name: "invalid arg",
 			Args: []string{"d6", "d0"},
 			ExpectedThrows: []ThrowGroup{
