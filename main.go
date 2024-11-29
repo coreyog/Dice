@@ -14,18 +14,18 @@ import (
 
 // ThrowGroup holds multiple FaceCount die rolls thrown at one time, e.g. 2d6+1d10
 type ThrowGroup struct {
-	Counts map[FaceCount]int // map[face count]number of throws
+	Counts map[FCount]int // map[face count]number of throws
 }
 
-// FaceCount represents a die with a number of faces, e.g. d6 or d10, notably d% for percentile dice
-type FaceCount struct {
-	FCount     int
+// FCount represents a die with a number of faces, e.g. d6 or d10, notably d% for percentile dice
+type FCount struct {
+	FaceCount  int
 	Percentile bool
 }
 
 // Throw represents a single die roll, with the number rolled and the FaceCount of the die
 type Throw struct {
-	FaceCount
+	FCount
 	Number int
 }
 
@@ -44,16 +44,7 @@ func main() {
 		outcomes := tg.Roll()
 
 		// sort outcomes by face count (percentile over non-percentile), then by number
-		sort.Slice(outcomes, func(i, j int) bool {
-			if outcomes[i].FCount == outcomes[j].FCount {
-				if outcomes[i].Percentile != outcomes[j].Percentile {
-					return outcomes[i].Percentile
-				}
-				return outcomes[i].Number > outcomes[j].Number
-			}
-
-			return outcomes[i].FCount > outcomes[j].FCount
-		})
+		sortThrows(outcomes)
 
 		// accumulate the total for this throw
 		total := 0
@@ -71,36 +62,47 @@ func main() {
 				numDisplay = "00"
 			}
 
-			_, _ = tab.Write([]byte(fmt.Sprintf("d%d( \t%s )\t", index.FaceCount.FCount, numDisplay)))
+			faceDisplay := strconv.Itoa(index.FaceCount)
+			if index.Percentile {
+				faceDisplay = "%"
+			}
+
+			_, _ = tab.Write([]byte(fmt.Sprintf("d%s( \t%s )\t", faceDisplay, numDisplay)))
 		}
 
-		// account for missing columns (each missing column is 3x tabs: after the
-		// plus, before the roll value, and after the roll value)
-		_, _ = tab.Write(bytes.Repeat([]byte("\t\t\t"), colCount-len(outcomes)))
+		if len(throws) > 1 || len(outcomes) > 1 {
+			// account for missing columns (each missing column is 3x tabs: after the
+			// plus, before the roll value, and after the roll value)
+			_, _ = tab.Write(bytes.Repeat([]byte("\t\t\t"), colCount-len(outcomes)))
 
-		// if there was more than 1 die thrown, print group total
-		if len(outcomes) > 1 {
 			fmt.Fprintf(tab, " = \t%d\t", total)
-			bigTotal += total
 		}
+
+		bigTotal += total
 
 		// prepare for next row of output
 		_, _ = tab.Write([]byte("\n"))
 	}
 
-	// if more than 1 group input, print BIG total
+	// if more than 1 group input, print TOTAL total
 	if len(throws) > 1 {
-		fmt.Fprintf(tab, "Total:\t%d\t\n", bigTotal)
+		count := (colCount)*3 - 1
+		fmt.Fprint(tab, strings.Repeat("\t", count))
+
+		fmt.Fprintf(tab, "= \t%d\t", bigTotal)
 	}
 
 	// flush the output or you don't see it
-	_ = tab.Flush()
+	err := tab.Flush()
+	if err != nil {
+		panic(err)
+	}
 }
 
 func parseArgs(args []string) (groups []ThrowGroup, columnCount int) {
 	for _, arg := range args {
 		tg := ThrowGroup{
-			Counts: map[FaceCount]int{},
+			Counts: map[FCount]int{},
 		}
 
 		// watch for x+y grouped args
@@ -139,8 +141,8 @@ func parseArgs(args []string) (groups []ThrowGroup, columnCount int) {
 			// accumulate total columns for this group
 			cols += num
 
-			tg.Counts[FaceCount{
-				FCount:     faces,
+			tg.Counts[FCount{
+				FaceCount:  faces,
 				Percentile: percentile,
 			}] = num
 		}
@@ -148,10 +150,25 @@ func parseArgs(args []string) (groups []ThrowGroup, columnCount int) {
 		// keep track of longest row for formatting
 		columnCount = max(columnCount, cols)
 
-		groups = append(groups, tg)
+		if len(tg.Counts) > 0 {
+			groups = append(groups, tg)
+		}
 	}
 
 	return groups, columnCount
+}
+
+func sortThrows(outcomes []Throw) {
+	sort.Slice(outcomes, func(i, j int) bool {
+		if outcomes[i].FaceCount == outcomes[j].FaceCount {
+			if outcomes[i].Percentile != outcomes[j].Percentile {
+				return outcomes[i].Percentile
+			}
+			return outcomes[i].Number > outcomes[j].Number
+		}
+
+		return outcomes[i].FaceCount > outcomes[j].FaceCount
+	})
 }
 
 func (tg ThrowGroup) Roll() []Throw {
@@ -160,7 +177,7 @@ func (tg ThrowGroup) Roll() []Throw {
 	for faceCount, number := range tg.Counts {
 		for range number {
 			// pull the best random number you can get
-			n, err := rand.Int(rand.Reader, big.NewInt(int64(faceCount.FCount)))
+			n, err := rand.Int(rand.Reader, big.NewInt(int64(faceCount.FaceCount)))
 			if err != nil {
 				panic(err)
 			}
@@ -175,8 +192,8 @@ func (tg ThrowGroup) Roll() []Throw {
 
 			// accumulate results
 			results = append(results, Throw{
-				FaceCount: faceCount,
-				Number:    selected,
+				FCount: faceCount,
+				Number: selected,
 			})
 		}
 	}
