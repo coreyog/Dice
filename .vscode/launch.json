@@ -10,7 +10,7 @@
 			"request": "launch",
 			"mode": "auto",
 			"program": "${workspaceFolder}",
-			"args": ["d6", "6d3", "2d10", "4d6", "3d8", "2d4", "d12", "d20", "d100"],
+			"args": ["d6", "3D20", "2d4+2d6", "d%+d10", "6dF", "2d6+10", "8-4"],
 		}
 	]
 }
