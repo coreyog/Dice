@@ -1,10 +1,105 @@
 package main
 
 import (
+	"bytes"
+	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+type ConstantSource struct {
+	seed byte
+}
+
+func (d *ConstantSource) Read(p []byte) (n int, err error) {
+	for i := range p {
+		p[i] = d.seed
+	}
+
+	return len(p), nil
+}
+
+type DeterministicSource struct {
+	seed byte
+}
+
+func (d *DeterministicSource) Read(p []byte) (n int, err error) {
+	for i := range p {
+		p[i] = d.seed
+		d.seed += 3
+	}
+
+	return len(p), nil
+}
+
+type PanickySource struct{}
+
+func (d *PanickySource) Read(p []byte) (n int, err error) {
+	return 0, errors.New("something went wrong")
+}
+
+func TestMain(m *testing.M) {
+	randSource = &ConstantSource{seed: 1}
+
+	m.Run()
+}
+
+func captureOutput(f func()) string {
+	randSource = &DeterministicSource{seed: 1}
+	r, w, _ := os.Pipe()
+	old := os.Stdout
+	os.Stdout = w
+
+	outC := make(chan string)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		outC <- buf.String()
+	}()
+
+	f()
+	_ = w.Close()
+	os.Stdout = old
+	return <-outC
+}
+
+func TestMainFunc(t *testing.T) {
+	os.Args = []string{"dice", "d6", "8D20", "2d4+2d6", "6d%+6d10", "2d6+10", "1d6-1", "6dF", "8-4"}
+	output := captureOutput(main)
+
+	expectedOutput := `
+ d6(  2 )                                                                                                                               =   2
+d20( 20 ) + d20( 17 ) + d20( 14 ) + d20( 11 ) + d20(  8 ) + d20(  6 ) + d20( 5 ) + d20( 3 )                                             =  84
+ d6(  5 ) +  d6(  2 ) +  d4(  4 ) +  d4(  1 )                                                                                           =  12
+ d%( 90 ) +  d%( 70 ) +  d%( 60 ) +  d%( 30 ) +  d%( 20 ) +  d%( 00 ) + d10( 9 ) + d10( 8 ) + d10( 6 ) + d10( 5 ) + d10( 2 ) + d10( 1 ) = 301
+ d6(  4 ) +  d6(  2 ) +        10                                                                                                       =  16
+ d6(  5 ) -         1                                                                                                                   =   4
+ dF(  1 ) +  dF(  1 ) +  dF(  0 ) +  dF(  0 ) +  dF( -1 ) +  dF( -1 )                                                                   =   0
+        4                                                                                                                               =   4
+                                                                                                                                        = 423
+`[1:]
+
+	assert.Equal(t, expectedOutput, output)
+}
+
+func TestMainOutputError(t *testing.T) {
+	old := os.Stdout
+	defer func() {
+		os.Stdout = old
+	}()
+
+	os.Args = []string{"dice", "d6", "8D20", "2d4+2d6", "6d%+6d10", "2d6+10", "1d6-1", "6dF", "8-4", "d0"}
+
+	_, w, _ := os.Pipe()
+	os.Stdout = w
+	w.Close()
+
+	assert.Panics(t, func() {
+		main()
+	})
+}
 
 func TestParseArgs(t *testing.T) {
 	t.Parallel()
@@ -209,11 +304,7 @@ func TestRoll(t *testing.T) {
 	tests := []*struct {
 		Name     string
 		Group    ThrowGroup
-		Expected []struct {
-			FCount
-			Min int
-			Max int
-		}
+		Expected []Throw
 	}{
 		{
 			Name: "d6",
@@ -224,18 +315,8 @@ func TestRoll(t *testing.T) {
 					}: 1,
 				},
 			},
-			Expected: []struct {
-				FCount
-				Min int
-				Max int
-			}{
-				{
-					FCount: FCount{
-						FaceCount: 6,
-					},
-					Min: 1,
-					Max: 6,
-				},
+			Expected: []Throw{
+				NewThrow(6, 2),
 			},
 		},
 		{
@@ -247,25 +328,9 @@ func TestRoll(t *testing.T) {
 					}: 2,
 				},
 			},
-			Expected: []struct {
-				FCount
-				Min int
-				Max int
-			}{
-				{
-					FCount: FCount{
-						FaceCount: 10,
-					},
-					Min: 1,
-					Max: 10,
-				},
-				{
-					FCount: FCount{
-						FaceCount: 10,
-					},
-					Min: 1,
-					Max: 10,
-				},
+			Expected: []Throw{
+				NewThrow(10, 2),
+				NewThrow(10, 2),
 			},
 		},
 		{
@@ -281,26 +346,15 @@ func TestRoll(t *testing.T) {
 					}: 1,
 				},
 			},
-			Expected: []struct {
-				FCount
-				Min int
-				Max int
-			}{
+			Expected: []Throw{
 				{
 					FCount: FCount{
 						FaceCount:  10,
 						Percentile: true,
 					},
-					Min: 0,
-					Max: 90,
+					Number: 10,
 				},
-				{
-					FCount: FCount{
-						FaceCount: 10,
-					},
-					Min: 1,
-					Max: 10,
-				},
+				NewThrow(10, 2),
 			},
 		},
 		{
@@ -312,18 +366,8 @@ func TestRoll(t *testing.T) {
 					}: 1,
 				},
 			},
-			Expected: []struct {
-				FCount
-				Min int
-				Max int
-			}{
-				{
-					FCount: FCount{
-						FaceCount: 64,
-					},
-					Min: 1,
-					Max: 64,
-				},
+			Expected: []Throw{
+				NewThrow(64, 2),
 			},
 		},
 		{
@@ -338,25 +382,13 @@ func TestRoll(t *testing.T) {
 					}: 3,
 				},
 			},
-			Expected: []struct {
-				FCount
-				Min int
-				Max int
-			}{
+			Expected: []Throw{
+				NewThrow(6, 2),
 				{
 					FCount: FCount{
-						FaceCount: 6,
+						Constant: true,
 					},
-					Min: 1,
-					Max: 6,
-				},
-				{
-					FCount: FCount{
-						Constant:  true,
-						FaceCount: 0,
-					},
-					Min: 3,
-					Max: 3,
+					Number: 3,
 				},
 			},
 		},
@@ -366,27 +398,37 @@ func TestRoll(t *testing.T) {
 		t.Run(test.Name, func(t *testing.T) {
 			t.Parallel()
 
-			runs := 100
+			outcomes := test.Group.Roll()
+			sortThrows(outcomes)
 
-			if testing.Short() {
-				runs = 10
-			}
+			assert.Equal(t, len(test.Expected), len(outcomes))
 
-			for range runs {
-				outcomes := test.Group.Roll()
-				sortThrows(outcomes)
-
-				assert.Equal(t, len(test.Expected), len(outcomes))
-
-				for i, out := range outcomes {
-					assert.Equal(t, test.Expected[i].FCount, out.FCount)
-					assert.Equal(t, test.Expected[i].Percentile, out.Percentile)
-					assert.LessOrEqual(t, out.Number, test.Expected[i].Max, "run #%d / %d: expected %d to be less than or equal to %d", runs, i, out.Number, test.Expected[i].Max)
-					assert.GreaterOrEqual(t, out.Number, test.Expected[i].Min, "run #%d / %d: expected %d to be greater than or equal to %d", runs, i, out.Number, test.Expected[i].Min)
-				}
+			for i, out := range outcomes {
+				assert.Equal(t, test.Expected[i].FCount, out.FCount)
+				assert.Equal(t, test.Expected[i].Percentile, out.Percentile)
+				assert.Equal(t, test.Expected[i].Number, out.Number)
 			}
 		})
 	}
+
+	t.Run("Panicky Source", func(t *testing.T) {
+		randSource = &PanickySource{}
+		defer func() {
+			randSource = &ConstantSource{seed: 1}
+		}()
+
+		group := ThrowGroup{
+			Counts: map[FCount]int{
+				{
+					FaceCount: 6,
+				}: 1,
+			},
+		}
+
+		assert.Panics(t, func() {
+			group.Roll()
+		})
+	})
 }
 
 func TestSplitOnOperators(t *testing.T) {

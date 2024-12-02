@@ -13,6 +13,8 @@ import (
 	"text/tabwriter"
 )
 
+var randSource = rand.Reader
+
 // ThrowGroup holds multiple FaceCount die rolls thrown at one time, e.g. 2d6+1d10
 type ThrowGroup struct {
 	Counts map[FCount]int // map[face count]number of throws
@@ -309,7 +311,7 @@ func (tg ThrowGroup) Roll() []Throw {
 		}
 		for range number {
 			// pull the best random number you can get
-			n, err := rand.Int(rand.Reader, big.NewInt(int64(faceCount.FaceCount)))
+			n, err := rand.Int(randSource, big.NewInt(int64(faceCount.FaceCount)))
 			if err != nil {
 				panic(err)
 			}
