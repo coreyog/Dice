@@ -3,35 +3,86 @@ package main
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
+func NewThrow(f int, n int) Throw {
+	return Throw{
+		FCount: FCount{
+			FaceCount: f,
+		},
+		Number: n,
+	}
+}
+
+func NewConstant(n int) Throw {
+	return Throw{
+		FCount: FCount{
+			FaceCount: n,
+			Constant:  true,
+		},
+	}
+}
+
+func NewPercentile(n int) Throw {
+	if n < 10 {
+		n *= 10
+	}
+
+	return Throw{
+		FCount: FCount{
+			FaceCount:  10,
+			Percentile: true,
+		},
+		Number: n,
+	}
+}
+
+func NewFudge(n int) Throw {
+	return Throw{
+		FCount: FCount{
+			FaceCount: 6,
+			Fudge:     true,
+		},
+		Number: n,
+	}
+}
+
 type DeterministicSource struct {
-	seed byte
+	data []byte
+	pos  int
+	err  string
+}
+
+func NewDeterministicSource(len int) *DeterministicSource {
+	return &DeterministicSource{
+		data: bytes.Repeat([]byte{3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3, 2, 3, 8, 4, 6, 2, 6, 4, 3, 3, 8, 3, 2, 7, 9, 5, 0, 2, 8, 8, 4, 1, 9, 7, 1, 6, 9, 3, 9, 9, 3, 7, 5, 1, 0, 5, 8, 2, 0, 9, 7, 4, 9, 4, 4, 5, 9, 2, 3, 0, 7, 8, 1, 6, 4, 0, 6, 2, 8, 6, 2, 0, 8, 9, 9, 8, 6, 2, 8, 0, 3, 4, 8, 2, 5}, len),
+		pos:  0,
+		err:  "",
+	}
 }
 
 func (d *DeterministicSource) Read(p []byte) (n int, err error) {
-	for i := range p {
-		p[i] = d.seed
-		d.seed += 3
+	if d.err != "" {
+		return 0, errors.New(d.err)
 	}
 
-	return len(p), nil
+	if d.pos >= len(d.data) {
+		return 0, io.EOF
+	}
+
+	n = copy(p, d.data[d.pos:])
+	d.pos += n
+
+	return n, nil
 }
 
-type PanickySource struct{}
-
-func (d *PanickySource) Read(p []byte) (n int, err error) {
-	return 0, errors.New("something went wrong")
-}
-
-func TestMain(m *testing.M) {
-	randSource = &DeterministicSource{seed: 1}
-
-	m.Run()
+func setup() {
+	randSource = NewDeterministicSource(5)
 }
 
 func captureOutput(f func()) string {
@@ -53,25 +104,29 @@ func captureOutput(f func()) string {
 }
 
 func TestMainFunc(t *testing.T) {
-	os.Args = []string{"dice", "d6", "8D20", "2d4+2d6", "6d%+6d10", "2d6+10", "1d6-1", "6dF", "8-4"}
+	setup()
+
+	os.Args = []string{"dice", "d6", "8D20", "2d4+2d6", "6d%+6d10", "10d%", "1d6-1", "6dF", "8-4"}
 	output := captureOutput(main)
 
 	expectedOutput := `
- d6(  2 )                                                                                                                               =   2
-d20( 20 ) + d20( 17 ) + d20( 14 ) + d20( 11 ) + d20(  8 ) + d20(  6 ) + d20( 5 ) + d20( 3 )                                             =  84
- d6(  5 ) +  d6(  2 ) +  d4(  4 ) +  d4(  1 )                                                                                           =  12
- d%( 90 ) +  d%( 70 ) +  d%( 60 ) +  d%( 30 ) +  d%( 20 ) +  d%( 00 ) + d10( 9 ) + d10( 8 ) + d10( 6 ) + d10( 5 ) + d10( 2 ) + d10( 1 ) = 301
- d6(  4 ) +  d6(  2 ) +        10                                                                                                       =  16
- d6(  5 ) -         1                                                                                                                   =   4
- dF(  1 ) +  dF(  1 ) +  dF(  0 ) +  dF(  0 ) +  dF( -1 ) +  dF( -1 )                                                                   =   0
-        4                                                                                                                               =   4
-                                                                                                                                        = 423
+ d6(  4 )                                                                                                                                   =   4
+d20( 10 ) + d20(  7 ) + d20(  6 ) + d20(  6 ) + d20(  5 ) + d20(  3 ) + d20(  2 ) + d20(  2 )                                               =  41
+ d6(  2 ) +  d6(  1 ) +  d4(  4 ) +  d4(  2 )                                                                                               =   9
+ d%( 90 ) +  d%( 80 ) +  d%( 70 ) +  d%( 30 ) +  d%( 30 ) +  d%( 20 ) + d10(  7 ) + d10(  7 ) + d10(  5 ) + d10(  5 ) + d10( 4 ) + d10( 3 ) = 351
+ d%( 90 ) +  d%( 80 ) +  d%( 80 ) +  d%( 70 ) +  d%( 50 ) +  d%( 30 ) +  d%( 30 ) +  d%( 20 ) +  d%( 20 ) +  d%( 00 )                       = 470
+ d6(  1 ) -         1                                                                                                                       =   0
+ dF(  1 ) +  dF(  0 ) +  dF( -1 ) +  dF( -1 ) +  dF( -1 ) +  dF( -1 )                                                                       =  -3
+        4                                                                                                                                   =   4
+                                                                                                                                            = 876
 `[1:]
 
 	assert.Equal(t, expectedOutput, output)
 }
 
 func TestMainOutputError(t *testing.T) {
+	setup()
+
 	old := os.Stdout
 	defer func() {
 		os.Stdout = old
@@ -83,12 +138,28 @@ func TestMainOutputError(t *testing.T) {
 	os.Stdout = w
 	w.Close()
 
-	assert.Panics(t, func() {
-		main()
-	})
+	assert.Panics(t, main)
+}
+
+func TestMainRandSourceError(t *testing.T) {
+	setup()
+	randSource.(*DeterministicSource).err = "error"
+
+	old := os.Stdout
+	defer func() {
+		os.Stdout = old
+	}()
+
+	os.Args = []string{"dice", "d6", "8D20", "2d4+2d6", "6d%+6d10", "2d6+10", "1d6-1", "6dF", "8-4", "d0"}
+
+	_, w, _ := os.Pipe()
+	os.Stdout = w
+
+	assert.Panics(t, main)
 }
 
 func TestParseArgs(t *testing.T) {
+	setup()
 	tests := []struct {
 		Name             string
 		Args             []string
@@ -160,7 +231,7 @@ func TestParseArgs(t *testing.T) {
 		},
 		{
 			Name: "constant",
-			Args: []string{"d6+3"},
+			Args: []string{"d6+3", "2+d4"},
 			ExpectedThrows: []ThrowGroup{
 				{
 					Counts: map[FCount]int{
@@ -170,6 +241,16 @@ func TestParseArgs(t *testing.T) {
 						{
 							Constant: true,
 						}: 3,
+					},
+				},
+				{
+					Counts: map[FCount]int{
+						{
+							FaceCount: 4,
+						}: 1,
+						{
+							Constant: true,
+						}: 2,
 					},
 				},
 			},
@@ -243,21 +324,7 @@ func TestParseArgs(t *testing.T) {
 		},
 		{
 			Name: "invalid arg",
-			Args: []string{"d6", "d0", "Hd2"},
-			ExpectedThrows: []ThrowGroup{
-				{
-					Counts: map[FCount]int{
-						{
-							FaceCount: 6,
-						}: 1,
-					},
-				},
-			},
-			ExpectedColCount: 1,
-		},
-		{
-			Name: "negative arg",
-			Args: []string{"-1d2", "d6"},
+			Args: []string{"d6", "d0", "Hd2", "-1d6"},
 			ExpectedThrows: []ThrowGroup{
 				{
 					Counts: map[FCount]int{
@@ -271,17 +338,20 @@ func TestParseArgs(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
-		t.Run(test.Name, func(t *testing.T) {
-			groups, colCount := parseArgs(test.Args)
-
-			assert.Equal(t, test.ExpectedThrows, groups)
-			assert.Equal(t, test.ExpectedColCount, colCount)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.Name, func(t *testing.T) {
+			setup()
+			throws, colCount := parseArgs(tt.Args)
+			assert.Equal(t, tt.ExpectedThrows, throws)
+			assert.Equal(t, tt.ExpectedColCount, colCount)
 		})
 	}
 }
 
 func TestRoll(t *testing.T) {
+	setup()
+
 	tests := []*struct {
 		Name     string
 		Group    ThrowGroup
@@ -297,7 +367,7 @@ func TestRoll(t *testing.T) {
 				},
 			},
 			Expected: []Throw{
-				NewThrow(6, 2),
+				NewThrow(6, 4),
 			},
 		},
 		{
@@ -310,340 +380,54 @@ func TestRoll(t *testing.T) {
 				},
 			},
 			Expected: []Throw{
-				NewThrow(10, 5),
+				NewThrow(10, 4),
 				NewThrow(10, 2),
 			},
 		},
-		{
-			Name: "d%+d10",
-			Group: ThrowGroup{
-				Counts: map[FCount]int{
-					{
-						FaceCount:  10,
-						Percentile: true,
-					}: 1,
-					{
-						FaceCount: 10,
-					}: 1,
-				},
-			},
-			Expected: []Throw{
-				{
-					FCount: FCount{
-						FaceCount:  10,
-						Percentile: true,
-					},
-					Number: 10,
-				},
-				NewThrow(10, 5),
-			},
-		},
-		{
-			Name: "d64",
-			Group: ThrowGroup{
-				Counts: map[FCount]int{
-					{
-						FaceCount: 64,
-					}: 1,
-				},
-			},
-			Expected: []Throw{
-				NewThrow(64, 2),
-			},
-		},
-		{
-			Name: "Constants",
-			Group: ThrowGroup{
-				Counts: map[FCount]int{
-					{
-						FaceCount: 6,
-					}: 1,
-					{
-						Constant: true,
-					}: 3,
-				},
-			},
-			Expected: []Throw{
-				NewThrow(6, 2),
-				{
-					FCount: FCount{
-						Constant: true,
-					},
-					Number: 3,
-				},
-			},
-		},
 	}
 
-	for _, test := range tests {
-		t.Run(test.Name, func(t *testing.T) {
-			randSource = &DeterministicSource{seed: 1}
-
-			outcomes := test.Group.Roll()
-			sortThrows(outcomes)
-
-			assert.Equal(t, len(test.Expected), len(outcomes))
-
-			for i, out := range outcomes {
-				assert.Equal(t, test.Expected[i].FCount, out.FCount)
-				assert.Equal(t, test.Expected[i].Percentile, out.Percentile)
-				assert.Equal(t, test.Expected[i].Number, out.Number)
-			}
-		})
-	}
-
-	t.Run("Panicky Source", func(t *testing.T) {
-		randSource = &PanickySource{}
-
-		group := ThrowGroup{
-			Counts: map[FCount]int{
-				{
-					FaceCount: 6,
-				}: 1,
-			},
-		}
-
-		assert.Panics(t, func() {
-			group.Roll()
-		})
-	})
-}
-
-func TestSplitOnOperators(t *testing.T) {
-	tests := []struct {
-		Name     string
-		Arg      string
-		Expected []string
-	}{
-		{
-			Name:     "empty",
-			Arg:      "",
-			Expected: []string{""},
-		},
-		{
-			Name:     "single",
-			Arg:      "d6",
-			Expected: []string{"d6"},
-		},
-		{
-			Name:     "plus",
-			Arg:      "d6+d10",
-			Expected: []string{"d6", "d10"},
-		},
-		{
-			Name:     "minus",
-			Arg:      "1-2",
-			Expected: []string{"1", "-2"},
-		},
-		{
-			Name:     "plus and minus",
-			Arg:      "1+2-3",
-			Expected: []string{"1", "2", "-3"},
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.Name, func(t *testing.T) {
-			grouped := splitOnOperators(test.Arg)
-
-			assert.Equal(t, test.Expected, grouped)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.Name, func(t *testing.T) {
+			setup()
+			throws := tt.Group.Roll()
+			assert.Equal(t, tt.Expected, throws)
 		})
 	}
 }
 
 func TestSortThrows(t *testing.T) {
-	tests := []struct {
-		Name     string
-		Throws   []Throw
-		NewOrder []Throw
-	}{
-		{
-			Name:     "empty",
-			Throws:   []Throw{},
-			NewOrder: []Throw{},
-		},
-		{
-			Name: "single",
-			Throws: []Throw{
-				NewThrow(6, 1),
-			},
-			NewOrder: []Throw{
-				NewThrow(6, 1),
-			},
-		},
-		{
-			Name: "Bigger Face Counts First",
-			Throws: []Throw{
-				NewThrow(10, 1),
-				NewThrow(20, 20),
-			},
-			NewOrder: []Throw{
-				NewThrow(20, 20),
-				NewThrow(10, 1),
-			},
-		},
-		{
-			Name: "Bigger Numbers First",
-			Throws: []Throw{
-				NewThrow(6, 1),
-				NewThrow(6, 6),
-				NewThrow(6, 3),
-			},
-			NewOrder: []Throw{
-				NewThrow(6, 6),
-				NewThrow(6, 3),
-				NewThrow(6, 1),
-			},
-		},
-		{
-			Name: "Percentile Before 10",
-			Throws: []Throw{
-				NewThrow(10, 1),
-				{
-					FCount: FCount{
-						FaceCount:  10,
-						Percentile: true,
-					},
-					Number: 1,
-				},
-			},
-			NewOrder: []Throw{
-				{
-					FCount: FCount{
-						FaceCount:  10,
-						Percentile: true,
-					},
-					Number: 1,
-				},
-				NewThrow(10, 1),
-			},
-		},
-		{
-			Name: "Fudge After 6",
-			Throws: []Throw{
-				{
-					FCount: FCount{
-						FaceCount: 6,
-						Fudge:     true,
-					},
-					Number: 2,
-				},
-				NewThrow(6, 1),
-			},
-			NewOrder: []Throw{
-				NewThrow(6, 1),
-				{
-					FCount: FCount{
-						FaceCount: 6,
-						Fudge:     true,
-					},
-					Number: 2,
-				},
-			},
-		},
-		{
-			Name: "Constants After All",
-			Throws: []Throw{
-				{
-					FCount: FCount{
-						FaceCount: 10,
-						Constant:  true,
-					},
-				},
-				{
-					FCount: FCount{
-						FaceCount:  10,
-						Percentile: true,
-					},
-					Number: 5,
-				},
-				{
-					FCount: FCount{
-						FaceCount: 6,
-						Fudge:     true,
-					},
-					Number: 2,
-				},
-				NewThrow(10, 9),
-				NewThrow(6, 1),
-				NewThrow(6, 6),
-			},
-			NewOrder: []Throw{
-				{
-					FCount: FCount{
-						FaceCount:  10,
-						Percentile: true,
-					},
-					Number: 5,
-				},
-				NewThrow(10, 9),
-				NewThrow(6, 6),
-				NewThrow(6, 1),
-				{
-					FCount: FCount{
-						FaceCount: 6,
-						Fudge:     true,
-					},
-					Number: 2,
-				},
-				{
-					FCount: FCount{
-						FaceCount: 10,
-						Constant:  true,
-					},
-				},
-			},
-		},
-		{
-			Name: "Sort Constants",
-			Throws: []Throw{
-				{
-					FCount: FCount{
-						FaceCount: 10,
-						Constant:  true,
-					},
-				},
-				{
-					FCount: FCount{
-						FaceCount: 20,
-					},
-					Number: 10,
-				},
-				{
-					FCount: FCount{
-						FaceCount: 5,
-						Constant:  true,
-					},
-				},
-			},
-			NewOrder: []Throw{
-				{
-					FCount: FCount{
-						FaceCount: 20,
-					},
-					Number: 10,
-				},
-				{
-					FCount: FCount{
-						FaceCount: 5,
-						Constant:  true,
-					},
-				},
-				{
-					FCount: FCount{
-						FaceCount: 10,
-						Constant:  true,
-					},
-				},
-			},
-		},
+	setup()
+
+	throws := []Throw{
+		NewConstant(4),
+		NewThrow(4, 2),
+		NewThrow(4, 3),
+		NewThrow(10, 5),
+		NewPercentile(30),
+		NewConstant(3),
+		NewConstant(2),
+		NewThrow(6, 4),
+		NewFudge(-1),
+		NewFudge(1),
+		NewThrow(4, 1),
+		NewThrow(6, 2),
 	}
 
-	for _, test := range tests {
-		t.Run(test.Name, func(t *testing.T) {
-			sortThrows(test.Throws)
+	sortThrows(throws)
 
-			assert.Equal(t, test.NewOrder, test.Throws)
-		})
-	}
+	assert.Equal(t, []Throw{
+		NewPercentile(30),
+		NewThrow(10, 5),
+		NewThrow(6, 4),
+		NewThrow(6, 2),
+		NewFudge(1),
+		NewFudge(-1),
+		NewThrow(4, 3),
+		NewThrow(4, 2),
+		NewThrow(4, 1),
+		NewConstant(2),
+		NewConstant(3),
+		NewConstant(4),
+	}, throws)
 }

@@ -34,15 +34,6 @@ type Throw struct {
 	Number int
 }
 
-func NewThrow(f int, n int) Throw {
-	return Throw{
-		FCount: FCount{
-			FaceCount: f,
-		},
-		Number: n,
-	}
-}
-
 func main() {
 	// parse input
 	throws, colCount := parseArgs(os.Args[1:])
