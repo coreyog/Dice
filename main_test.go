@@ -9,18 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type ConstantSource struct {
-	seed byte
-}
-
-func (d *ConstantSource) Read(p []byte) (n int, err error) {
-	for i := range p {
-		p[i] = d.seed
-	}
-
-	return len(p), nil
-}
-
 type DeterministicSource struct {
 	seed byte
 }
@@ -41,13 +29,12 @@ func (d *PanickySource) Read(p []byte) (n int, err error) {
 }
 
 func TestMain(m *testing.M) {
-	randSource = &ConstantSource{seed: 1}
+	randSource = &DeterministicSource{seed: 1}
 
 	m.Run()
 }
 
 func captureOutput(f func()) string {
-	randSource = &DeterministicSource{seed: 1}
 	r, w, _ := os.Pipe()
 	old := os.Stdout
 	os.Stdout = w
@@ -102,8 +89,6 @@ func TestMainOutputError(t *testing.T) {
 }
 
 func TestParseArgs(t *testing.T) {
-	t.Parallel()
-
 	tests := []struct {
 		Name             string
 		Args             []string
@@ -288,8 +273,6 @@ func TestParseArgs(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
-			t.Parallel()
-
 			groups, colCount := parseArgs(test.Args)
 
 			assert.Equal(t, test.ExpectedThrows, groups)
@@ -299,8 +282,6 @@ func TestParseArgs(t *testing.T) {
 }
 
 func TestRoll(t *testing.T) {
-	t.Parallel()
-
 	tests := []*struct {
 		Name     string
 		Group    ThrowGroup
@@ -329,7 +310,7 @@ func TestRoll(t *testing.T) {
 				},
 			},
 			Expected: []Throw{
-				NewThrow(10, 2),
+				NewThrow(10, 5),
 				NewThrow(10, 2),
 			},
 		},
@@ -354,7 +335,7 @@ func TestRoll(t *testing.T) {
 					},
 					Number: 10,
 				},
-				NewThrow(10, 2),
+				NewThrow(10, 5),
 			},
 		},
 		{
@@ -396,7 +377,7 @@ func TestRoll(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
-			t.Parallel()
+			randSource = &DeterministicSource{seed: 1}
 
 			outcomes := test.Group.Roll()
 			sortThrows(outcomes)
@@ -413,9 +394,6 @@ func TestRoll(t *testing.T) {
 
 	t.Run("Panicky Source", func(t *testing.T) {
 		randSource = &PanickySource{}
-		defer func() {
-			randSource = &ConstantSource{seed: 1}
-		}()
 
 		group := ThrowGroup{
 			Counts: map[FCount]int{
@@ -466,8 +444,6 @@ func TestSplitOnOperators(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
-			t.Parallel()
-
 			grouped := splitOnOperators(test.Arg)
 
 			assert.Equal(t, test.Expected, grouped)
@@ -665,8 +641,6 @@ func TestSortThrows(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
-			t.Parallel()
-
 			sortThrows(test.Throws)
 
 			assert.Equal(t, test.NewOrder, test.Throws)
