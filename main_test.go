@@ -2,13 +2,17 @@ package main
 
 import (
 	"bytes"
-	"errors"
-	"io"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func init() {
+	randNum = func(n int) int {
+		return 0
+	}
+}
 
 func NewThrow(f int, n int) Throw {
 	return Throw{
@@ -52,39 +56,6 @@ func NewFudge(n int) Throw {
 	}
 }
 
-type DeterministicSource struct {
-	data []byte
-	pos  int
-	err  string
-}
-
-func NewDeterministicSource(len int) *DeterministicSource {
-	return &DeterministicSource{
-		data: bytes.Repeat([]byte{3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3, 2, 3, 8, 4, 6, 2, 6, 4, 3, 3, 8, 3, 2, 7, 9, 5, 0, 2, 8, 8, 4, 1, 9, 7, 1, 6, 9, 3, 9, 9, 3, 7, 5, 1, 0, 5, 8, 2, 0, 9, 7, 4, 9, 4, 4, 5, 9, 2, 3, 0, 7, 8, 1, 6, 4, 0, 6, 2, 8, 6, 2, 0, 8, 9, 9, 8, 6, 2, 8, 0, 3, 4, 8, 2, 5}, len),
-		pos:  0,
-		err:  "",
-	}
-}
-
-func (d *DeterministicSource) Read(p []byte) (n int, err error) {
-	if d.err != "" {
-		return 0, errors.New(d.err)
-	}
-
-	if d.pos >= len(d.data) {
-		return 0, io.EOF
-	}
-
-	n = copy(p, d.data[d.pos:])
-	d.pos += n
-
-	return n, nil
-}
-
-func setup() {
-	randSource = NewDeterministicSource(5)
-}
-
 func captureOutput(f func()) string {
 	r, w, _ := os.Pipe()
 	old := os.Stdout
@@ -104,29 +75,38 @@ func captureOutput(f func()) string {
 }
 
 func TestMainFunc(t *testing.T) {
-	setup()
+	orig := randNum
+	defer func() {
+		randNum = orig
+	}()
 
-	os.Args = []string{"dice", "d6", "8D20", "2d4+2d6", "6d%+6d10", "10d%", "1d6-1", "6dF", "8-4"}
+	index := 0
+	arr := []int{1, 6, 4, 5, 1, 3, 0, 8, 1, 3, 0, 2, 4}
+	randNum = func(n int) int {
+		ret := arr[index]
+		index++
+
+		return ret
+	}
+
+	os.Args = []string{"dice", "d6", "2D20", "2d4+2d6", "d%+d10", "1d6-1", "3dF", "8-4"}
 	output := captureOutput(main)
 
 	expectedOutput := `
- d6(  4 )                                                                                                                                   =   4
-d20( 10 ) + d20(  7 ) + d20(  6 ) + d20(  6 ) + d20(  5 ) + d20(  3 ) + d20(  2 ) + d20(  2 )                                               =  41
- d6(  2 ) +  d6(  1 ) +  d4(  4 ) +  d4(  2 )                                                                                               =   9
- d%( 90 ) +  d%( 80 ) +  d%( 70 ) +  d%( 30 ) +  d%( 30 ) +  d%( 20 ) + d10(  7 ) + d10(  7 ) + d10(  5 ) + d10(  5 ) + d10( 4 ) + d10( 3 ) = 351
- d%( 90 ) +  d%( 80 ) +  d%( 80 ) +  d%( 70 ) +  d%( 50 ) +  d%( 30 ) +  d%( 30 ) +  d%( 20 ) +  d%( 20 ) +  d%( 00 )                       = 470
- d6(  1 ) -         1                                                                                                                       =   0
- dF(  1 ) +  dF(  0 ) +  dF( -1 ) +  dF( -1 ) +  dF( -1 ) +  dF( -1 )                                                                       =  -3
-        4                                                                                                                                   =   4
-                                                                                                                                            = 876
+ d6(  2 )                                 =   2
+d20(  7 ) + d20( 5 )                      =  12
+ d6(  4 ) +  d6( 1 ) + d4(  6 ) + d4( 2 ) =  13
+ d%( 80 ) + d10( 2 )                      =  82
+ d6(  4 ) -        1                      =   3
+ dF(  1 ) +  dF( 0 ) + dF( -1 )           =   0
+        4                                 =   4
+                                          = 116
 `[1:]
 
 	assert.Equal(t, expectedOutput, output)
 }
 
 func TestMainOutputError(t *testing.T) {
-	setup()
-
 	old := os.Stdout
 	defer func() {
 		os.Stdout = old
@@ -142,8 +122,13 @@ func TestMainOutputError(t *testing.T) {
 }
 
 func TestMainRandSourceError(t *testing.T) {
-	setup()
-	randSource.(*DeterministicSource).err = "error"
+	orig := randNum
+	randNum = func(n int) int {
+		panic("something went wrong")
+	}
+	defer func() {
+		randNum = orig
+	}()
 
 	old := os.Stdout
 	defer func() {
@@ -159,7 +144,6 @@ func TestMainRandSourceError(t *testing.T) {
 }
 
 func TestParseArgs(t *testing.T) {
-	setup()
 	tests := []struct {
 		Name             string
 		Args             []string
@@ -341,7 +325,6 @@ func TestParseArgs(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.Name, func(t *testing.T) {
-			setup()
 			throws, colCount := parseArgs(tt.Args)
 			assert.Equal(t, tt.ExpectedThrows, throws)
 			assert.Equal(t, tt.ExpectedColCount, colCount)
@@ -350,8 +333,6 @@ func TestParseArgs(t *testing.T) {
 }
 
 func TestRoll(t *testing.T) {
-	setup()
-
 	tests := []*struct {
 		Name     string
 		Group    ThrowGroup
@@ -367,7 +348,7 @@ func TestRoll(t *testing.T) {
 				},
 			},
 			Expected: []Throw{
-				NewThrow(6, 4),
+				NewThrow(6, 1),
 			},
 		},
 		{
@@ -380,8 +361,8 @@ func TestRoll(t *testing.T) {
 				},
 			},
 			Expected: []Throw{
-				NewThrow(10, 4),
-				NewThrow(10, 2),
+				NewThrow(10, 1),
+				NewThrow(10, 1),
 			},
 		},
 	}
@@ -389,7 +370,6 @@ func TestRoll(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.Name, func(t *testing.T) {
-			setup()
 			throws := tt.Group.Roll()
 			assert.Equal(t, tt.Expected, throws)
 		})
@@ -397,10 +377,9 @@ func TestRoll(t *testing.T) {
 }
 
 func TestSortThrows(t *testing.T) {
-	setup()
-
 	throws := []Throw{
 		NewConstant(4),
+		NewConstant(1),
 		NewThrow(4, 2),
 		NewThrow(4, 3),
 		NewThrow(10, 5),
@@ -426,8 +405,37 @@ func TestSortThrows(t *testing.T) {
 		NewThrow(4, 3),
 		NewThrow(4, 2),
 		NewThrow(4, 1),
+		NewConstant(1),
 		NewConstant(2),
 		NewConstant(3),
 		NewConstant(4),
 	}, throws)
+}
+
+func TestSortFCounts(t *testing.T) {
+	faces := []FCount{
+		{FaceCount: 6},
+		{FaceCount: 2, Constant: true},
+		{FaceCount: 1, Constant: true},
+		{FaceCount: 10, Percentile: true},
+		{FaceCount: 6, Fudge: true},
+		{FaceCount: 6},
+		{FaceCount: 10},
+		{FaceCount: 10, Percentile: true},
+		{FaceCount: 3, Constant: true},
+	}
+
+	SortFCounts(faces)
+
+	assert.Equal(t, []FCount{
+		{FaceCount: 10, Percentile: true},
+		{FaceCount: 10, Percentile: true},
+		{FaceCount: 10},
+		{FaceCount: 6},
+		{FaceCount: 6},
+		{FaceCount: 6, Fudge: true},
+		{FaceCount: 1, Constant: true},
+		{FaceCount: 2, Constant: true},
+		{FaceCount: 3, Constant: true},
+	}, faces)
 }

@@ -13,8 +13,6 @@ import (
 	"text/tabwriter"
 )
 
-var randSource = rand.Reader
-
 // ThrowGroup holds multiple FaceCount die rolls thrown at one time, e.g. 2d6+1d10
 type ThrowGroup struct {
 	Counts map[FCount]int // map[face count]number of throws
@@ -32,6 +30,16 @@ type FCount struct {
 type Throw struct {
 	FCount
 	Number int
+}
+
+var randNum = func(n int) int {
+	// pull the best random number you can get
+	num, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
+	if err != nil {
+		panic(err)
+	}
+
+	return int(num.Int64())
 }
 
 func main() {
@@ -289,26 +297,58 @@ func sortThrows(outcomes []Throw) {
 	})
 }
 
+func SortFCounts(keys []FCount) {
+	sort.Slice(keys, func(i, j int) bool {
+		// Move constants to the end
+		if keys[i].Constant && !keys[j].Constant {
+			return false
+		}
+		if !keys[i].Constant && keys[j].Constant {
+			return true
+		}
+
+		// If both are constants, sort by FaceCount (constant value)
+		if keys[i].Constant && keys[j].Constant {
+			return keys[i].FaceCount < keys[j].FaceCount
+		}
+
+		// Existing sorting logic for non-constants
+		if keys[i].FaceCount == keys[j].FaceCount {
+			if keys[i].Percentile != keys[j].Percentile {
+				return keys[i].Percentile
+			}
+
+			if keys[i].Fudge != keys[j].Fudge {
+				return keys[j].Fudge
+			}
+		}
+
+		return keys[i].FaceCount > keys[j].FaceCount
+	})
+}
+
 func (tg ThrowGroup) Roll() []Throw {
 	results := make([]Throw, 0, len(tg.Counts))
 
-	for faceCount, number := range tg.Counts {
+	keys := make([]FCount, 0, len(tg.Counts))
+	for k := range tg.Counts {
+		keys = append(keys, k)
+	}
+
+	for _, faceCount := range keys {
+		number := tg.Counts[faceCount]
+
 		if faceCount.Constant {
 			results = append(results, Throw{
 				FCount: faceCount,
 				Number: number,
 			})
+
 			continue
 		}
-		for range number {
-			// pull the best random number you can get
-			n, err := rand.Int(randSource, big.NewInt(int64(faceCount.FaceCount)))
-			if err != nil {
-				panic(err)
-			}
 
-			// normalize
-			selected := int(n.Int64())
+		for range number {
+			selected := randNum(faceCount.FaceCount)
 			if faceCount.Percentile {
 				selected *= 10
 			} else {
